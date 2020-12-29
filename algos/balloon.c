@@ -23,7 +23,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stddef.h>
 
 #define BUFLEN (1 << 18)
 #define EXPROUNDS (BUFLEN / 32)
