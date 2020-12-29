@@ -110,54 +110,50 @@ bool coind_validate_user_address(YAAMP_COIND *coind, char* const address)
 bool coind_validate_address(YAAMP_COIND *coind)
 {
 	if(!coind->wallet[0]) return false;
-
 	char params[YAAMP_SMALLBUFSIZE];
 	sprintf(params, "[\"%s\"]", coind->wallet);
 
 	json_value *json;
-	bool getaddressinfo = false;
-	json = rpc_call(&coind->rpc, "validateaddress", params);
-	if(!json) return false;
+	bool getaddressinfo = ((strcmp(coind->symbol,"DGB") == 0) || (strcmp(coind->symbol2, "DGB") == 0));
 
+    // ZENX 0.19.x also should use getaddressinfo, because validateaddress haven't field "ismine"
+    if (strcmp(coind->symbol,"ZENX") == 0) {
+        json = rpc_call(&coind->rpc, "getnetworkinfo", "[]");
+        if(!json) return false;
+        json_value *json_result = json_get_object(json, "result");
+        if(!json_result)
+        {
+            json_value_free(json);
+            return false;
+        }
+        int zenx_version = json_get_int(json_result, "version");
+        if (zenx_version >= 180100) getaddressinfo = 1;
+    }
+
+
+	if(getaddressinfo)
+		json = rpc_call(&coind->rpc, "getaddressinfo", params);
+	else
+		json = rpc_call(&coind->rpc, "validateaddress", params);
+	if(!json) return false;
 	json_value *json_result = json_get_object(json, "result");
 	if(!json_result)
 	{
 		json_value_free(json);
 		return false;
 	}
-
-	if(!json_get_bool(json_result, "ismine"))
-	{
-		stratumlog("%s wallet is using getaddressinfo.\n", coind->name);
-		getaddressinfo = true;
-		json = rpc_call(&coind->rpc, "getaddressinfo", params);
-
-		json_result = json_get_object(json, "result");
-		if(!json_result)
-		{
-			json_value_free(json);
-			return false;
-		}
-	}
-
 	bool isvalid = getaddressinfo || json_get_bool(json_result, "isvalid");
 	if(!isvalid) stratumlog("%s wallet %s is not valid.\n", coind->name, coind->wallet);
-
 	bool ismine = json_get_bool(json_result, "ismine");
 	if(!ismine) stratumlog("%s wallet %s is not mine.\n", coind->name, coind->wallet);
 	else isvalid = ismine;
-
 	const char *p = json_get_string(json_result, "pubkey");
 	strcpy(coind->pubkey, p ? p : "");
-
 	const char *acc = json_get_string(json_result, "account");
 	if (acc) strcpy(coind->account, acc);
-
 	if (!base58_decode(coind->wallet, coind->script_pubkey))
 		stratumlog("Warning: unable to decode %s %s script pubkey\n", coind->symbol, coind->wallet);
-
 	coind->p2sh_address = json_get_bool(json_result, "isscript");
-
 	// if base58 decode fails
 	if (!strlen(coind->script_pubkey)) {
 		const char *pk = json_get_string(json_result, "scriptPubKey");
@@ -170,29 +166,22 @@ bool coind_validate_address(YAAMP_COIND *coind)
 		}
 	}
 	json_value_free(json);
-
 	return isvalid && ismine;
 }
-
 void coind_init(YAAMP_COIND *coind)
 {
 	char params[YAAMP_SMALLBUFSIZE];
 	char account[YAAMP_SMALLBUFSIZE];
-
 	yaamp_create_mutex(&coind->mutex);
-
 	strcpy(account, coind->account);
 	if(!strcmp(coind->rpcencoding, "DCR")) {
 		coind->usegetwork = true;
 		//sprintf(account, "default");
 	}
-
 	bool valid = coind_validate_address(coind);
 	if(valid) return;
-
 	sprintf(params, "[\"%s\"]", account);
-
-	json_value *json = rpc_call(&coind->rpc, "getnewaddress", params);
+	json_value *json = rpc_call(&coind->rpc, "getaccountaddress", params);
 	if(!json)
 	{
 		json = rpc_call(&coind->rpc, "getaddressesbyaccount", params);
@@ -206,7 +195,6 @@ void coind_init(YAAMP_COIND *coind)
 			return;
 		}
 	}
-
 	if (json->u.object.values[0].value->type == json_string) {
 		strcpy(coind->wallet, json->u.object.values[0].value->u.string.ptr);
 	}
@@ -214,9 +202,7 @@ void coind_init(YAAMP_COIND *coind)
 		strcpy(coind->wallet, "");
 		stratumlog("ERROR getaccountaddress %s\n", coind->name);
 	}
-
 	json_value_free(json);
-
 	coind_validate_address(coind);
 	if (strlen(coind->wallet)) {
 		debuglog(">>>>>>>>>>>>>>>>>>>> using wallet %s %s\n",
@@ -271,9 +257,3 @@ void coind_terminate(YAAMP_COIND *coind)
 
 //	coind_terminate(coind);
 //}
-
-
-
-
-
-
